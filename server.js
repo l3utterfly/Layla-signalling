@@ -29,7 +29,7 @@ app.post("/rtc/get-answer", pollLimiter, (req, res) => {
   const { secret, offer } = req.body;
 
   // set the offer in cache to ensure it exists and can be retrieved by the answerer
-  cache.set(`rtc-offers-${secret}`, offer, 300); // 300s = 5 min TTL
+  cache.set(`rtc-offers-${secret}`, { payload: offer }, 300); // 300s = 5 min TTL
 
   const entry = cache.get(`rtc-answers-${secret}`);
 
