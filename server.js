@@ -10,14 +10,6 @@ const pollLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const offerLimiter = rateLimit({
-  windowMs: 30_000,
-  max: 5,         // expect 1 per 30s, allow a few bursts
-  message: { error: "Too many requests." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 const app = express();
 const cache = new NodeCache();
 
@@ -42,7 +34,7 @@ app.post("/rtc/get-answer", pollLimiter, (req, res) => {
 });
 
 // POST /rtc/submit-answer
-app.post("/rtc/submit-answer", offerLimiter, (req, res) => {
+app.post("/rtc/submit-answer", pollLimiter, (req, res) => {
   const answer = req.body;
   cache.set(`rtc-answers-${answer.secret}`, answer, 60); // 60s = 1 min TTL
   res.sendStatus(200);

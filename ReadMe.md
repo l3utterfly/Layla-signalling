@@ -8,22 +8,22 @@ A lightweight HTTP-based signaling server for WebRTC peer connections. Peers exc
 
 WebRTC requires an out-of-band channel to exchange session descriptions (SDP) before a direct peer-to-peer connection can be established. This server acts as that channel.
 
-1. **Caller** generates a shared `secret` and POSTs an SDP offer to `/rtc/submit-offer`
+1. **Caller** generates a shared `secret` and an SDP offer; **Caller** POSTs the offer via `/rtc/get-answer` (this endpoint is designed to both submit an offer and retrieve an answer in one step, to simplify client logic)
 2. **Callee** polls `/rtc/get-offer` with the same secret to retrieve it
 3. **Callee** POSTs an SDP answer to `/rtc/submit-answer`
-4. **Caller** polls `/rtc/get-answer` to retrieve the answer
+4. **Caller** polls `/rtc/get-answer` to retrieve the answer; **Caller** is allowed to update their offer every time they poll for the answer, so they can include updated ICE candidates or other information as needed
 5. Both peers have everything they need to establish a direct connection
 
 ```
 Caller                        Server                        Callee
   |                              |                              |
-  |-- POST /rtc/submit-offer --> |                              |
-  |                              | <-- POST /rtc/get-offer  -- |
-  |                              | --- offer --------------> |
+  |-- POST /rtc/get-answer -->   |                              |
+  |                              | <-- POST /rtc/get-offer  --  |
+  |                              | --- offer -------------->    |
   |                              | <-- POST /rtc/submit-answer -|
   | <-- POST /rtc/get-answer --- |                              |
   |                              |                              |
-  |========== WebRTC P2P connection established ===============|
+  |========== WebRTC P2P connection established ================|
 ```
 
 ---
@@ -32,20 +32,19 @@ Caller                        Server                        Callee
 
 All endpoints accept and return `application/json`. The `secret` field is a shared key known to both peers — it is never stored beyond the TTL and is deleted from cache on retrieval of an answer.
 
-### `POST /rtc/submit-offer`
+### `POST /rtc/get-answer`
 
-Submit an SDP offer. The offer is cached for **5 minutes**.
+Retrieve a pending SDP answer by secret. This endpoint also allows the caller to update their offer with each poll. **The answer is deleted from cache after retrieval.**
 
 **Request body:**
 ```json
 {
   "secret": "your-shared-secret",
-  "sdp": "...",
-  ...
+  "offer": "[sdp string]"
 }
 ```
 
-**Response:** `200 OK`
+**Response:** `200 OK` with the original answer body, or `404` if not found.
 
 ---
 
@@ -81,27 +80,12 @@ Submit an SDP answer. The answer is cached for **1 minute**.
 
 ---
 
-### `POST /rtc/get-answer`
-
-Retrieve a pending SDP answer by secret. **The answer is deleted from cache after retrieval.**
-
-**Request body:**
-```json
-{
-  "secret": "your-shared-secret"
-}
-```
-
-**Response:** `200 OK` with the original answer body, or `404` if not found.
-
----
-
 ## Rate Limiting
 
 | Endpoint group              | Window  | Max requests |
 |-----------------------------|---------|--------------|
 | `/get-offer`, `/get-answer` | 1s      | 3            |
-| `/submit-offer`, `/submit-answer` | 30s | 5          |
+| `/submit-answer`            | 1s      | 3            |
 
 Rate limit headers are returned with every response (`RateLimit-*`). Exceeded limits return `429 Too Many Requests`.
 
@@ -119,8 +103,8 @@ The server trusts the `X-Forwarded-For` header (`trust proxy 1`), so it works co
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/your-repo.git
-cd your-repo
+git clone https://github.com/l3utterfly/Layla-signalling.git
+cd Layla-signalling
 npm install
 ```
 
@@ -167,7 +151,7 @@ The server is already configured with `trust proxy 1`. No additional changes are
 ## Security Considerations
 
 - **Secrets are not validated** — use sufficiently random secrets (e.g. a UUID or 128-bit random hex) to prevent enumeration.
-- **No authentication** — No authentication is included by design; the shared secret provides implicit access control. Consider an API key if you need to restrict usage to known clients.
+- **No authentication** — No authentication is included by design; the shared secret provides implicit access control.
 - **HTTPS** — always run behind TLS in production. The server itself does not handle TLS termination.
 
 ---
