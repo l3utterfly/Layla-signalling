@@ -26,7 +26,11 @@ app.set("trust proxy", 1);  // trust X-Forwarded-For header for rate limiting be
 
 // POST /rtc/get-answer
 app.post("/rtc/get-answer", pollLimiter, (req, res) => {
-  const { secret } = req.body;
+  const { secret, offer } = req.body;
+
+  // set the offer in cache to ensure it exists and can be retrieved by the answerer
+  cache.set(`rtc-offers-${offer.secret}`, offer, 300); // 300s = 5 min TTL
+
   const entry = cache.get(`rtc-answers-${secret}`);
 
   if (!entry) {
@@ -41,13 +45,6 @@ app.post("/rtc/get-answer", pollLimiter, (req, res) => {
 app.post("/rtc/submit-answer", offerLimiter, (req, res) => {
   const answer = req.body;
   cache.set(`rtc-answers-${answer.secret}`, answer, 60); // 60s = 1 min TTL
-  res.sendStatus(200);
-});
-
-// POST /rtc/submit-offer
-app.post("/rtc/submit-offer", offerLimiter, (req, res) => {
-  const offer = req.body;
-  cache.set(`rtc-offers-${offer.secret}`, offer, 300); // 300s = 5 min TTL
   res.sendStatus(200);
 });
 
