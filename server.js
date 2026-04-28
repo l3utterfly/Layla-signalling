@@ -55,9 +55,6 @@ app.post("/rtc/get-offer", pollLimiter, (req, res) => {
     return res.status(404).json({ error: "No offer found." });
   }
 
-  // remove offer to prevent reuse
-  cache.del(`rtc-offer-${secret}`);
-
   res.json(entry);
 });
 
