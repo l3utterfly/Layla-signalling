@@ -60,10 +60,12 @@ app.post("/rtc/get-offer", pollLimiter, (req, res) => {
 
 // POST /rtc/submit-answer
 app.post("/rtc/submit-answer", pollLimiter, (req, res) => {
-  const { secret, payload, offerFp } = req.body;
-  if (!secret || !payload || !offerFp) {
-    return res.status(400).json({ error: "Missing secret, payload, or offerFp." });
+  const { secret, payload, offer } = req.body;
+  if (!secret || !payload || !offer) {
+    return res.status(400).json({ error: "Missing secret, payload, or offer." });
   }
+
+  const offerFp = sdpFingerprint(offer);
 
   // Verify the offer this answer targets is still current
   const currentOffer = cache.get(`rtc-offer-${secret}`);
