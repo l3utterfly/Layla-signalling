@@ -1,10 +1,11 @@
 const express = require("express");
 const NodeCache = require("node-cache");
+const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 
 const pollLimiter = rateLimit({
   windowMs: 1000,
-  max: 3,         // expect 1/sec, allow 3x headroom for retries/jitter
+  max: 3,
   message: { error: "Too many requests." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -14,43 +15,64 @@ const app = express();
 const cache = new NodeCache();
 
 app.use(express.json());
-app.set("trust proxy", 1);  // trust X-Forwarded-For header for rate limiting behind proxies/load balancers
+app.set("trust proxy", 1);
+
+function sdpFingerprint(sdp) {
+  return crypto.createHash("sha256").update(sdp).digest("hex").slice(0, 16);
+}
 
 // POST /rtc/get-answer
 app.post("/rtc/get-answer", pollLimiter, (req, res) => {
   const { secret, offer } = req.body;
-
-  // set the offer in cache to ensure it exists and can be retrieved by the answerer
-  cache.set(`rtc-offers-${secret}`, { payload: offer }, 300); // 300s = 5 min TTL
-
-  const entry = cache.get(`rtc-answers-${secret}`);
-
-  if (!entry) {
-    return res.status(404).json({ error: "No answers found for the provided secret." });
+  if (!secret || !offer) {
+    return res.status(400).json({ error: "Missing secret or offer." });
   }
 
-  cache.del(`rtc-answers-${secret}`); // clear after retrieval
-  res.json(entry);
-});
+  const offerFp = sdpFingerprint(offer);
 
-// POST /rtc/submit-answer
-app.post("/rtc/submit-answer", pollLimiter, (req, res) => {
-  const answer = req.body;
-  cache.set(`rtc-answers-${answer.secret}`, answer, 60); // 60s = 1 min TTL
-  res.sendStatus(200);
+  // Publish/refresh the offer
+  cache.set(`rtc-offer-${secret}`, { payload: offer, offerFp }, 300);
+
+  // Lookup answer keyed to THIS specific offer
+  const entry = cache.get(`rtc-answer-${secret}-${offerFp}`);
+  if (!entry) {
+    return res.status(404).json({ error: "No matching answer yet." });
+  }
+
+  cache.del(`rtc-answer-${secret}-${offerFp}`);
+  res.json(entry);
 });
 
 // POST /rtc/get-offer
 app.post("/rtc/get-offer", pollLimiter, (req, res) => {
   const { secret } = req.body;
-  const entry = cache.get(`rtc-offers-${secret}`);
-
-  if (!entry) {
-    return res.status(404).json({ error: "No offer found for the provided secret." });
+  if (!secret) {
+    return res.status(400).json({ error: "Missing secret." });
   }
 
-  cache.del(`rtc-offers-${secret}`); // clear after retrieval
+  const entry = cache.get(`rtc-offer-${secret}`);
+  if (!entry) {
+    return res.status(404).json({ error: "No offer found." });
+  }
+
   res.json(entry);
+});
+
+// POST /rtc/submit-answer
+app.post("/rtc/submit-answer", pollLimiter, (req, res) => {
+  const { secret, payload, offerFp } = req.body;
+  if (!secret || !payload || !offerFp) {
+    return res.status(400).json({ error: "Missing secret, payload, or offerFp." });
+  }
+
+  // Verify the offer this answer targets is still current
+  const currentOffer = cache.get(`rtc-offer-${secret}`);
+  if (!currentOffer || currentOffer.offerFp !== offerFp) {
+    return res.status(409).json({ error: "Offer has changed. Re-fetch and retry." });
+  }
+
+  cache.set(`rtc-answer-${secret}-${offerFp}`, { secret, payload }, 60);
+  res.sendStatus(200);
 });
 
 const PORT = process.env.PORT || 3000;
